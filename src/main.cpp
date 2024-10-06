@@ -1,5 +1,4 @@
 #include "cmd_line_parser.h"
-#include "logger.h"
 #include "engine.h"
 #include <chrono>
 #include <opencv2/cudaimgproc.hpp>
@@ -7,10 +6,6 @@
 
 int main(int argc, char *argv[]) {
     CommandLineArguments arguments;
-
-    std::string logLevelStr = getLogLevelFromEnvironment();
-    spdlog::level::level_enum logLevel = toSpdlogLevel(logLevelStr);
-    spdlog::set_level(logLevel);
 
     // Parse the command line arguments
     if (!parseArguments(argc, argv, arguments)) {
@@ -29,8 +24,6 @@ int main(int argc, char *argv[]) {
     options.optBatchSize = 1;
     // Specify the maximum batch size we plan on running.
     options.maxBatchSize = 1;
-    // Specify the directory where you want the model engine model file saved.
-    options.engineFileDir = ".";
 
     Engine<float> engine(options);
 
@@ -63,9 +56,7 @@ int main(int argc, char *argv[]) {
         // Load the TensorRT engine file directly
         bool succ = engine.loadNetwork(arguments.trtModelPath, subVals, divVals, normalize);
         if (!succ) {
-            const std::string msg = "Unable to load TensorRT engine.";
-            spdlog::error(msg);
-            throw std::runtime_error(msg);
+            throw std::runtime_error("Unable to load TensorRT engine.");
         }
     }
 
@@ -74,9 +65,7 @@ int main(int argc, char *argv[]) {
     const std::string inputImage = "../inputs/team.jpg";
     auto cpuImg = cv::imread(inputImage);
     if (cpuImg.empty()) {
-        const std::string msg = "Unable to read image at path: " + inputImage;
-        spdlog::error(msg);
-        throw std::runtime_error(msg);
+        throw std::runtime_error("Unable to read image at path: " + inputImage);
     }
 
     // Upload the image GPU memory
@@ -119,20 +108,18 @@ int main(int argc, char *argv[]) {
     }
 
     // Warm up the network before we begin the benchmark
-    spdlog::info("Warming up the network...");
+    std::cout << "\nWarming up the network..." << std::endl;
     std::vector<std::vector<std::vector<float>>> featureVectors;
     for (int i = 0; i < 100; ++i) {
         bool succ = engine.runInference(inputs, featureVectors);
         if (!succ) {
-            const std::string msg = "Unable to run inference.";
-            spdlog::error(msg);
-            throw std::runtime_error(msg);
+            throw std::runtime_error("Unable to run inference.");
         }
     }
 
     // Benchmark the inference time
     size_t numIterations = 1000;
-    spdlog::info("Running benchmarks ({} iterations)...", numIterations);
+    std::cout << "Warmup done. Running benchmarks (" << numIterations << " iterations)...\n" << std::endl;
     preciseStopwatch stopwatch;
     for (size_t i = 0; i < numIterations; ++i) {
         featureVectors.clear();
@@ -141,28 +128,30 @@ int main(int argc, char *argv[]) {
     auto totalElapsedTimeMs = stopwatch.elapsedTime<float, std::chrono::milliseconds>();
     auto avgElapsedTimeMs = totalElapsedTimeMs / numIterations / static_cast<float>(inputs[0].size());
 
-    spdlog::info("Benchmarking complete!");
-    spdlog::info("======================");
-    spdlog::info("Avg time per sample: ");
-    spdlog::info("Avg time per sample: {} ms", avgElapsedTimeMs);
-    spdlog::info("Batch size: {}", inputs[0].size());
-    spdlog::info("Avg FPS: {} fps", static_cast<int>(1000 / avgElapsedTimeMs));
-    spdlog::info("======================\n");
+    std::cout << "Benchmarking complete!" << std::endl;
+    std::cout << "======================" << std::endl;
+    std::cout << "Avg time per sample: " << std::endl;
+    std::cout << avgElapsedTimeMs << " ms" << std::endl;
+    std::cout << "Batch size: " << std::endl;
+    std::cout << inputs[0].size() << std::endl;
+    std::cout << "Avg FPS: " << std::endl;
+    std::cout << static_cast<int>(1000 / avgElapsedTimeMs) << " fps" << std::endl;
+    std::cout << "======================\n" << std::endl;
 
     // Print the feature vectors
     for (size_t batch = 0; batch < featureVectors.size(); ++batch) {
         for (size_t outputNum = 0; outputNum < featureVectors[batch].size(); ++outputNum) {
-            spdlog::info("Batch {}, output {}", batch, outputNum);
-            std::string output;
+            std::cout << "Batch " << batch << ", "
+                      << "output " << outputNum << std::endl;
             int i = 0;
             for (const auto &e : featureVectors[batch][outputNum]) {
-                output += std::to_string(e) + " ";
+                std::cout << e << " ";
                 if (++i == 10) {
-                    output += "...";
+                    std::cout << "...";
                     break;
                 }
             }
-            spdlog::info("{}", output);
+            std::cout << "\n" << std::endl;
         }
     }
 

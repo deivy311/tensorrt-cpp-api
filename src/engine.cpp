@@ -9,25 +9,22 @@
 using namespace nvinfer1;
 using namespace Util;
 
+std::vector<std::string> Util::getFilesInDirectory(const std::string &dirPath) {
+    std::vector<std::string> filepaths;
+    for (const auto &entry : std::filesystem::directory_iterator(dirPath)) {
+        filepaths.emplace_back(entry.path().string());
+    }
+    return filepaths;
+}
+
 void Logger::log(Severity severity, const char *msg) noexcept {
-    switch (severity) {
-        case Severity::kVERBOSE:
-            spdlog::debug(msg);
-            break;
-        case Severity::kINFO:
-            spdlog::info(msg);
-            break;
-        case Severity::kWARNING:
-            spdlog::warn(msg);
-            break;
-        case Severity::kERROR:
-            spdlog::error(msg);
-            break;
-        case Severity::kINTERNAL_ERROR:
-            spdlog::critical(msg);
-            break;
-        default:
-            spdlog::info("Unexpected severity level");
+    // Would advise using a proper logging utility such as
+    // https://github.com/gabime/spdlog For the sake of this tutorial, will just
+    // log to the console.
+
+    // Only log Warnings or more important.
+    if (severity <= Severity::kWARNING) {
+        std::cout << msg << std::endl;
     }
 }
 
@@ -44,16 +41,12 @@ Int8EntropyCalibrator2::Int8EntropyCalibrator2(int32_t batchSize, int32_t inputW
 
     // Read the name of all the files in the specified directory.
     if (!doesFileExist(calibDataDirPath)) {
-        auto msg = "Error, directory at provided path does not exist: " + calibDataDirPath;
-        spdlog::error(msg);
-        throw std::runtime_error(msg);
+        throw std::runtime_error("Error, directory at provided path does not exist: " + calibDataDirPath);
     }
 
     m_imgPaths = getFilesInDirectory(calibDataDirPath);
     if (m_imgPaths.size() < static_cast<size_t>(batchSize)) {
-        auto msg = "Error, there are fewer calibration images than the specified batch size!";
-        spdlog::error(msg);
-        throw std::runtime_error(msg);
+        throw std::runtime_error("There are fewer calibration images than the specified batch size!");
     }
 
     // Randomize the calibration data
@@ -79,16 +72,16 @@ bool Int8EntropyCalibrator2::getBatch(void **bindings, const char **names, int32
     // Read the calibration images into memory for the current batch
     std::vector<cv::cuda::GpuMat> inputImgs;
     for (int i = m_imgIdx; i < m_imgIdx + m_batchSize; i++) {
-        spdlog::info("Reading image {}: {}", i, m_imgPaths[i]);
+        std::cout << "Reading image " << i << ": " << m_imgPaths[i] << std::endl;
         auto cpuImg = cv::imread(m_imgPaths[i]);
         if (cpuImg.empty()) {
-            spdlog::error("Fatal error: Unable to read image at path: " + m_imgPaths[i]);
+            std::cout << "Fatal error: Unable to read image at path: " << m_imgPaths[i] << std::endl;
             return false;
         }
 
         cv::cuda::GpuMat gpuImg;
         gpuImg.upload(cpuImg);
-        //cv::cuda::cvtColor(gpuImg, gpuImg, cv::COLOR_BGR2RGB);
+        cv::cuda::cvtColor(gpuImg, gpuImg, cv::COLOR_BGR2RGB);
 
         // TODO: Define any preprocessing code here, such as resizing
         auto resized = Engine<float>::resizeKeepAspectRatioPadRightBottom(gpuImg, m_inputH, m_inputW);
@@ -98,7 +91,7 @@ bool Int8EntropyCalibrator2::getBatch(void **bindings, const char **names, int32
 
     // Convert the batch from NHWC to NCHW
     // ALso apply normalization, scaling, and mean subtraction
-    auto mfloat = Engine<float>::blobFromGpuMats(inputImgs, m_subVals, m_divVals, m_normalize, true);
+    auto mfloat = Engine<float>::blobFromGpuMats(inputImgs, m_subVals, m_divVals, m_normalize);
     auto *dataPointer = mfloat.ptr<void>();
 
     // Copy the GPU buffer to member variable so that it persists
@@ -106,7 +99,7 @@ bool Int8EntropyCalibrator2::getBatch(void **bindings, const char **names, int32
 
     m_imgIdx += m_batchSize;
     if (std::string(names[0]) != m_inputBlobName) {
-        spdlog::error("Error: Incorrect input name provided!");
+        std::cout << "Error: Incorrect input name provided!" << std::endl;
         return false;
     }
     bindings[0] = m_deviceInput;
@@ -114,12 +107,12 @@ bool Int8EntropyCalibrator2::getBatch(void **bindings, const char **names, int32
 }
 
 void const *Int8EntropyCalibrator2::readCalibrationCache(size_t &length) noexcept {
-    spdlog::info("Searching for calibration cache: {}", m_calibTableName);
+    std::cout << "Searching for calibration cache: " << m_calibTableName << std::endl;
     m_calibCache.clear();
     std::ifstream input(m_calibTableName, std::ios::binary);
     input >> std::noskipws;
     if (m_readCache && input.good()) {
-        spdlog::info("Reading calibration cache: {}", m_calibTableName);
+        std::cout << "Reading calibration cache: " << m_calibTableName << std::endl;
         std::copy(std::istream_iterator<char>(input), std::istream_iterator<char>(), std::back_inserter(m_calibCache));
     }
     length = m_calibCache.size();
@@ -127,8 +120,7 @@ void const *Int8EntropyCalibrator2::readCalibrationCache(size_t &length) noexcep
 }
 
 void Int8EntropyCalibrator2::writeCalibrationCache(const void *ptr, std::size_t length) noexcept {
-    spdlog::info("Writing calibration cache: {}", m_calibTableName);
-    spdlog::info("Calibration cache size: {} bytes", length);
+    std::cout << "Writing calib cache: " << m_calibTableName << " Size: " << length << " bytes" << std::endl;
     std::ofstream output(m_calibTableName, std::ios::binary);
     output.write(reinterpret_cast<const char *>(ptr), length);
 }
